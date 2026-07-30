@@ -11,6 +11,15 @@ import (
 	"github.com/launchdarkly/go-sdk-common/v3/ldcontext"
 )
 
+// Client interface for feature flag providers
+type Client interface {
+	BuildContext(context.Context, string, string, Attributes) ldcontext.Context
+	IsFeatureFlagEnabled(context.Context, string, string) bool
+}
+
+// Attributes represents feature flag attributes
+type Attributes map[string]interface{}
+
 // LocalFileSchema defines local feature-flag values used in development mode.
 type LocalFileSchema struct {
 	Defaults     map[string]bool            `json:"defaults"`
