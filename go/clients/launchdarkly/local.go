@@ -8,14 +8,9 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/JHADigitalCore/elec-go-clients/launchdarkly"
 	"github.com/launchdarkly/go-sdk-common/v3/ldcontext"
 )
-
-// Client interface for feature flag providers
-type Client interface {
-	BuildContext(context.Context, string, string, Attributes) ldcontext.Context
-	IsFeatureFlagEnabled(context.Context, string, string) bool
-}
 
 // Attributes represents feature flag attributes
 type Attributes map[string]interface{}
@@ -33,11 +28,11 @@ type localClient struct {
 	data LocalFileSchema
 }
 
-var _ Client = (*localClient)(nil)
+var _ launchdarkly.Client = (*localClient)(nil)
 
 // NewLocalClientFromFile initializes a local feature-flag provider from a JSON
 // file. It is intended for local development and testing.
-func NewLocalClientFromFile(path string) (Client, error) {
+func NewLocalClientFromFile(path string) (launchdarkly.Client, error) {
 	trimmedPath := strings.TrimSpace(path)
 	if trimmedPath == "" {
 		return nil, fmt.Errorf("feature flags file path is required")
@@ -67,7 +62,7 @@ func NewLocalClientFromFile(path string) (Client, error) {
 }
 
 // BuildContext is not used by the local provider but required by Client.
-func (*localClient) BuildContext(context.Context, string, string, Attributes) ldcontext.Context {
+func (*localClient) BuildContext(_ context.Context, _, _ string, _ launchdarkly.Attributes) ldcontext.Context {
 	return ldcontext.Context{}
 }
 
