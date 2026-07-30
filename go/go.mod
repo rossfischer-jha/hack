@@ -1,4 +1,4 @@
-module github.com/rossfischer-jha/hack
+module github.com/rossfischer-jha/hack/go
 
 go 1.26.0
 
