@@ -1,0 +1,173 @@
+services:
+  # opentelemetry collector
+  opentelemetry-collector:
+    container_name: local-telemetry-collector
+    image: otel/opentelemetry-collector:0.120.0
+    networks:
+      - default
+    ports:
+      - "4317:4317"
+      - "55679:55679"
+    volumes:
+      - ./otel-config.yaml:/etc/otelcol/config.yaml
+    logging:
+      options:
+        max-size: "10m"
+        max-file: "3"
+    depends_on:
+      spanner-migrate:
+        condition: service_completed_successfully
+
+  # wiremock
+  wiremock:
+    container_name: local-wiremock
+    image: wiremock/wiremock:3.5.2
+    networks:
+      - default
+    volumes:
+      - ./wiremock:/home/wiremock
+      - ./wiremock/mappings:/home/wiremock/mappings
+    command:
+      - "--https-port=8443"
+      - "--https-keystore=/home/wiremock/wiremock-localhost.pfx"
+      - "--keystore-type=PKCS12"
+      - "--keystore-password=password"
+      - "--verbose"
+      - "--global-response-templating"
+    ports:
+      - "8090:8080"
+      - "9443:8443"
+    logging:
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # spanner emulator
+  spanner:
+    image: gcr.io/cloud-spanner-emulator/emulator:latest
+    platform: linux/arm64
+    container_name: local-spanner-db
+    networks:
+      - default
+    ports:
+      - "9020:9020"
+      - "9010:9010"
+    restart: always
+
+  # pubsub emulator
+  pubsub:
+    image: gcr.io/google.com/cloudsdktool/google-cloud-cli:emulators
+    platform: linux/arm64
+    container_name: local-pubsub
+    networks:
+      - default
+    restart: unless-stopped
+    ports:
+      - "9200:9200"
+    environment:
+      PROJECT: ${PROJECT}
+    command: >
+      bash -c 'gcloud beta emulators pubsub start --project=${PROJECT} --host-port=0.0.0.0:9200'
+    healthcheck:
+      test: curl --http2 --fail http://pubsub:9200 || exit 1
+      start_period: 10s
+
+  # spanner init
+  spanner-init:
+    image: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    container_name: local-spanner-init
+    networks:
+      - default
+    environment:
+      PROJECT: ${PROJECT}
+      INSTANCE: ${INSTANCE}
+    volumes:
+      - "./init:/init"
+    command: bash /init/spanner-init.sh -p ${PROJECT} -i ${INSTANCE}
+    depends_on:
+      spanner:
+        condition: service_started
+
+  # pubsub init
+  pubsub-init:
+    image: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    container_name: local-pubsub-init
+    networks:
+      - default
+    environment:
+      PROJECT: ${PROJECT}
+    volumes:
+      - "./init:/init"
+    command: bash /init/pubsub-init.sh -p ${PROJECT};
+    depends_on:
+      pubsub:
+        condition: service_healthy
+
+  # spanner migrate
+  spanner-migrate:
+    image: docker.artifactory.banno-tools.com/jh-digitalcore/migrate:0.3.0
+    platform: linux/arm64
+    container_name: local-db-migration
+    networks:
+      - default
+    environment:
+      SPANNER_EMULATOR_HOST: spanner:9010
+      JHADIGITALCORE: ${GOPATH}/JHADigitalCore
+      PROJECT: ${PROJECT}
+      INSTANCE: ${INSTANCE}
+      # DATABASE_NAME: ${DATABASE}
+    # the #8 migration adds tokenlists / fulltext search, which by itself works, but puts the emulator in a weird state where
+    # it may segfault on index lookups.  To combat that for dev work we will override the entrypoint and do
+    # three migrate commands, which "skip" the #8 migrations.  If you are doing dev work that touches full text
+    # search you will have to do some modifications here
+    entrypoint: ""
+    command: ["/init/migrate-entrypoint.sh"]
+    volumes:
+      - "./init:/init"
+      - "../../JHADigitalCore/elec-wire-service/db/migrations/:/elec-wire-service-migrations"
+      - "../../JHADigitalCore/elec-wire-entity-service/db/migrations/:/elec-wire-entity-service-migrations"
+      - "../../JHADigitalCore/elec-wire-approval-service/db/migrations/:/elec-wire-approval-service-migrations"
+      - "../../JHADigitalCore/elec-wire-draft-service/db/migrations/:/elec-wire-draft-service-migrations"
+      - "../../JHADigitalCore/elec-money-transfer-service/db/migrations/:/elec-money-transfer-service-migrations"
+      - "../../JHADigitalCore/elec-wire-test/db/migrations/:/elec-wire-test-migrations"
+    depends_on:
+      spanner:
+        condition: service_started
+      spanner-init:
+        condition: service_completed_successfully
+
+  # fake-launchdarkly-service
+  fake-launchdarkly-service:
+    build:
+      context: ./fake-launchdarkly-service
+      dockerfile: Dockerfile
+    platform: linux/arm64
+    container_name: local-fake-launchdarkly-service
+    networks:
+      - default
+    ports:
+      - "4000:4000"
+    restart: always
+
+  # redis (used by elec-wire-test)
+  redis:
+    image: redis:7.2-alpine
+    container_name: local-redis
+    ports:
+      - "6379:6379"
+    restart: always
+    command: redis-server --appendonly yes
+    volumes:
+      - redis-data:/data
+    logging:
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  redis-data:
+    driver: local
+
+networks:
+  default:
+    name: infra_default

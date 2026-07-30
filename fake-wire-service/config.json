@@ -1,0 +1,48 @@
+{
+  "wires": {
+    "11111111-1111-1111-1111-111111111111": {
+      "paymentUetr": "44444444-4444-4444-4444-444444444444",
+      "amount": {
+        "value": "123.45",
+        "currencyType": "USD"
+      },
+      "creditor": {
+        "name": "Test Creditor",
+        "account": {
+          "accountId": "S00006502280000"
+        }
+      },
+      "debtor": {
+        "name": "Test Debtor",
+        "account": {
+          "accountId": "S00006502280000"
+        }
+      },
+      "sentOn": "2025-03-21T15:07:54.217084135Z",
+      "transactionType": "outgoing",
+      "wireId": "11111111-1111-1111-1111-111111111111"
+    },
+    "22222222-2222-2222-2222-222222222222": {
+      "paymentUetr": "55555555-5555-5555-5555-555555555555",
+      "amount": {
+        "value": "999.99",
+        "currencyType": "USD"
+      },
+      "creditor": {
+        "name": "Alice Smith",
+        "account": {
+          "accountId": "C00001234567890"
+        }
+      },
+      "debtor": {
+        "name": "Bob Jones",
+        "account": {
+          "accountId": "D00009876543210"
+        }
+      },
+      "sentOn": "2026-05-28T10:00:00Z",
+      "transactionType": "incoming",
+      "wireId": "22222222-2222-2222-2222-222222222222"
+    }
+  }
+}

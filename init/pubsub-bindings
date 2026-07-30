@@ -1,0 +1,10 @@
+elec-wire-instructionevent:elec-wire-instructionevent-elec-wire-service-sub
+elec-wire-step-statusevent:shared-services-sanctionsenterpriseevent-elec-sub
+elec-incoming-messages:elec-incoming-messages_elec-wire-service
+elec-entity:elec-entity_elec-wire-service-sub
+elec-credit-transfers:elec-credit-transfers_elec-wire-approval-service
+elec-cache-invalidation-us-central1:elec-cache-invalidation-us-central1-sub
+elec-cache-invalidation-us-east4:elec-cache-invalidation-us-east4-sub
+elec-cache-invalidation-local:elec-cache-invalidation-local-sub
+elec-corpay-payment-status-updated:elec-corpay-payment-status-updated-money-transfer-service-sub
+

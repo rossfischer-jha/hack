@@ -1,0 +1,11 @@
+{
+  "name": "nag-public-key",
+  "request": {
+    "url": "/gateway/public-key",
+    "method": "GET"
+  },
+  "response": {
+    "bodyFileName": "nag-public-key.pem",
+    "status": 200
+  }
+}
