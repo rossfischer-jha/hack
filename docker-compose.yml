@@ -47,6 +47,11 @@ services:
     image: gcr.io/cloud-spanner-emulator/emulator:latest
     platform: linux/arm64
     container_name: local-spanner-db
+    command:
+      - "./gateway_main"
+      - "--hostname"
+      - "0.0.0.0"
+      - "--disable_query_null_filtered_index_check"
     networks:
       - default
     ports:
@@ -129,25 +134,14 @@ services:
       - "../../JHADigitalCore/elec-wire-approval-service/db/migrations/:/elec-wire-approval-service-migrations"
       - "../../JHADigitalCore/elec-wire-draft-service/db/migrations/:/elec-wire-draft-service-migrations"
       - "../../JHADigitalCore/elec-money-transfer-service/db/migrations/:/elec-money-transfer-service-migrations"
+      - "../../JHADigitalCore/elec-incoming-wire-processor/db/migrations/:/elec-incoming-wire-processor-migrations"
+      - "../../JHADigitalCore/elec-wire-fee-service/db/migrations/:/elec-wire-fee-service-migrations"
       - "../../JHADigitalCore/elec-wire-test/db/migrations/:/elec-wire-test-migrations"
     depends_on:
       spanner:
         condition: service_started
       spanner-init:
         condition: service_completed_successfully
-
-  # fake-launchdarkly-service
-  fake-launchdarkly-service:
-    build:
-      context: ./fake-launchdarkly-service
-      dockerfile: Dockerfile
-    platform: linux/arm64
-    container_name: local-fake-launchdarkly-service
-    networks:
-      - default
-    ports:
-      - "4000:4000"
-    restart: always
 
   # redis (used by elec-wire-test)
   redis:
@@ -170,4 +164,4 @@ volumes:
 
 networks:
   default:
-    name: infra_default
+    name: hack_default

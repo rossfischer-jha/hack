@@ -7,4 +7,7 @@ elec-cache-invalidation-us-central1:elec-cache-invalidation-us-central1-sub
 elec-cache-invalidation-us-east4:elec-cache-invalidation-us-east4-sub
 elec-cache-invalidation-local:elec-cache-invalidation-local-sub
 elec-corpay-payment-status-updated:elec-corpay-payment-status-updated-money-transfer-service-sub
-
+elec-wire-moneytransferevent:elec-wire-moneytransferevent-money-transfer-processor-sub
+elec-incoming-messages:elec-incoming-messages_elec-incoming-wire-processor
+elec-incoming-wires:elec-incoming-wire-processor-sub
+elec-dlw-incoming-message:elec-dlw-incoming-message-sub
