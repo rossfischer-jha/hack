@@ -4,7 +4,7 @@
 
 project="${PROJECT:-wire-emulator}"
 pubsub_host="${PUBSUB_EMULATOR_URL:-http://pubsub:9200}"
-bindings_file="${PUBSUB_BINDINGS_FILE:-/init/pubsub-bindings}"
+bindings_file="${PUBSUB_BINDINGS_FILE:-/init/pubsub-bindings.yaml}"
 
 create_topic() {
   local topic="$1"
@@ -41,34 +41,10 @@ echo "bindings_file: ${bindings_file}"
 
 echo "Setting up Pub/Sub"
 
-declare -A created_topics=()
+while IFS= read -r topic; do
+  create_topic "$topic"
 
-while IFS= read -r raw_line || [[ -n "$raw_line" ]]; do
-  line="${raw_line%%#*}"
-  line="${line#${line%%[![:space:]]*}}"
-  line="${line%${line##*[![:space:]]}}"
-
-  if [[ -z "$line" ]]; then
-    continue
-  fi
-
-  if [[ "$line" != *:* ]]; then
-    echo "Invalid binding '${line}'. Expected format topic:subscription" >&2
-    exit 1
-  fi
-
-  topic="${line%%:*}"
-  subscription="${line#*:}"
-
-  if [[ -z "$topic" || -z "$subscription" ]]; then
-    echo "Invalid binding '${line}'. Topic and subscription are required." >&2
-    exit 1
-  fi
-
-  if [[ -z "${created_topics[$topic]:-}" ]]; then
-    create_topic "$topic"
-    created_topics[$topic]=1
-  fi
-
-  create_subscription "$topic" "$subscription"
-done < "$bindings_file"
+  while IFS= read -r subscription; do
+    create_subscription "$topic" "$subscription"
+  done < <(TOPIC="$topic" yq '.topics[] | select(.name == strenv(TOPIC)) | .subscriptions[]?' "$bindings_file")
+done < <(yq '.topics[].name' "$bindings_file")

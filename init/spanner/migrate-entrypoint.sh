@@ -1,8 +1,5 @@
 #! /bin/sh
-
 set -x
-
-ls -ld /elec-wire-*;
 
 ## TODO: move to bindings system and put in loop
 

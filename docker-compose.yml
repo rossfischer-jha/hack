@@ -42,6 +42,21 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  # redis (used by elec-wire-test)
+  redis:
+    image: redis:7.2-alpine
+    container_name: local-redis
+    ports:
+      - "6379:6379"
+    restart: always
+    command: redis-server --appendonly yes
+    volumes:
+      - redis-data:/data
+    logging:
+      options:
+        max-size: "10m"
+        max-file: "3"
+
   # spanner emulator
   spanner:
     image: gcr.io/cloud-spanner-emulator/emulator:latest
@@ -79,7 +94,10 @@ services:
 
   # spanner init
   spanner-init:
-    image: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    build:
+      context: ./img/cloud-sdk
+      dockerfile: Dockerfile
+    image: local-init:latest
     container_name: local-spanner-init
     networks:
       - default
@@ -87,7 +105,7 @@ services:
       PROJECT: ${PROJECT}
       INSTANCE: ${INSTANCE}
     volumes:
-      - "./init:/init"
+      - "./init/spanner:/init"
     command: bash /init/spanner-init.sh -p ${PROJECT} -i ${INSTANCE}
     depends_on:
       spanner:
@@ -95,14 +113,18 @@ services:
 
   # pubsub init
   pubsub-init:
-    image: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    build:
+      context: ./img/cloud-sdk
+      dockerfile: Dockerfile
+    platform: linux/arm64
+    image: local-init:latest
     container_name: local-pubsub-init
     networks:
       - default
     environment:
       PROJECT: ${PROJECT}
     volumes:
-      - "./init:/init"
+      - "./init/pubsub:/init"
     command: bash /init/pubsub-init.sh -p ${PROJECT};
     depends_on:
       pubsub:
@@ -120,15 +142,10 @@ services:
       JHADIGITALCORE: ${GOPATH}/JHADigitalCore
       PROJECT: ${PROJECT}
       INSTANCE: ${INSTANCE}
-      # DATABASE_NAME: ${DATABASE}
-    # the #8 migration adds tokenlists / fulltext search, which by itself works, but puts the emulator in a weird state where
-    # it may segfault on index lookups.  To combat that for dev work we will override the entrypoint and do
-    # three migrate commands, which "skip" the #8 migrations.  If you are doing dev work that touches full text
-    # search you will have to do some modifications here
     entrypoint: ""
     command: ["/init/migrate-entrypoint.sh"]
     volumes:
-      - "./init:/init"
+      - "./init/spanner:/init"
       - "../../JHADigitalCore/elec-wire-service/db/migrations/:/elec-wire-service-migrations"
       - "../../JHADigitalCore/elec-wire-entity-service/db/migrations/:/elec-wire-entity-service-migrations"
       - "../../JHADigitalCore/elec-wire-approval-service/db/migrations/:/elec-wire-approval-service-migrations"
@@ -142,21 +159,6 @@ services:
         condition: service_started
       spanner-init:
         condition: service_completed_successfully
-
-  # redis (used by elec-wire-test)
-  redis:
-    image: redis:7.2-alpine
-    container_name: local-redis
-    ports:
-      - "6379:6379"
-    restart: always
-    command: redis-server --appendonly yes
-    volumes:
-      - redis-data:/data
-    logging:
-      options:
-        max-size: "10m"
-        max-file: "3"
 
 volumes:
   redis-data:

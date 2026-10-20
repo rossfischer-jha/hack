@@ -2,3 +2,8 @@
 .vscode/
 .idea/
 bin/
+
+# Vim swap files
+*.swp
+*.swo
+*.swn

@@ -1,0 +1,119 @@
+topics:
+  - name: elec-wire-fee-review
+    subscriptions:
+      - elec-wire-fee-review_elec-wire-service
+  - name: elec-wire-instructionevent
+    subscriptions:
+      - elec-wire-instructionevent-elec-wire-service-sub
+      - elec-wire-instructionevent-elec-wire-entity-service-sub
+      - elec-wire-instructionevent-elec-wire-notif-instruction-processor-sub
+  - name: elec-wire-step-statusevent
+    subscriptions:
+      - shared-services-sanctionsenterpriseevent-elec-sub
+      - elec-wire-step-statusevent-wire-processor-sub
+  - name: elec-incoming-messages
+    subscriptions:
+      - elec-incoming-messages_elec-wire-service
+      - elec-incoming-messages_elec-incoming-wire-processor
+  - name: elec-entity
+    subscriptions:
+      - elec-entity_elec-wire-service-sub
+  - name: elec-credit-transfers
+    subscriptions:
+      - elec-credit-transfers_elec-wire-approval-service
+      - elec-credit-transfers_elec-account-validation-service
+      - elec-credit-transfers_elec-wire-entity-service
+      - elec-credit-transfers_elec-money-transfer-processor
+      - elec-credit-transfers_elec-ees-relay-processor
+  - name: elec-cache-invalidation-us-central1
+    subscriptions:
+      - elec-cache-invalidation-us-central1-sub
+  - name: elec-cache-invalidation-us-east4
+    subscriptions:
+      - elec-cache-invalidation-us-east4-sub
+  - name: elec-cache-invalidation-local
+    subscriptions:
+      - elec-cache-invalidation-local-sub
+  - name: elec-corpay-payment-status-updated
+    subscriptions:
+      - elec-corpay-payment-status-updated-money-transfer-service-sub
+  - name: elec-wire-moneytransferevent
+    subscriptions:
+      - elec-wire-moneytransferevent-money-transfer-processor-sub
+  - name: elec-incoming-wires
+    subscriptions:
+      - elec-incoming-wire-processor-sub
+  - name: elec-dlw-incoming-message
+    subscriptions:
+      - elec-dlw-incoming-message-sub
+  - name: elec-wire-process-event
+    subscriptions:
+      - elec-wire-process-event-wire-processor-sub
+  - name: elec-sanction-status
+    subscriptions:
+      - elec-sanction-status_elec-wire-service
+  - name: elec-wire-step-status
+    subscriptions:
+      - elec-wire-step-status_elec-wire-processor
+  - name: elec-wire-step-status-updated
+    subscriptions:
+      - elec-wire-step-status-updated_elec-ees-relay-processor
+  - name: elec-wire-status-updated
+    subscriptions:
+      - elec-wire-status-updated_elec-ees-relay-processor
+  - name: platform-approvals-notifications
+    subscriptions:
+      - elec-wire-process-approval-sub
+  - name: platform-approvals-consumer-notifications
+    subscriptions:
+      - elec-wire-process-approval-consumer-sub
+  - name: elec-wire-approval-service-notification
+    subscriptions:
+      - elec-wire-approval-service-notification_wire-processor-sub
+  - name: elec-wire-account-validationevent
+    subscriptions:
+      - elec-wire-account-validationevent-account-validation-service-sub
+  - name: elec-wire-notificationevent
+    subscriptions:
+      - elec-wire-notificationevent-elec-wire-notif-processor-sub
+  - name: elec-fed-send-msg-nonvalue
+    subscriptions:
+      - elec-fed-send-msg-nonvalue-elec-fed-send-service-sub
+  - name: elec-dlw-outgoing-message
+    subscriptions:
+      - elec-dlw-outgoing-message-dlw-message-processor-sub
+  - name: elec-dlw-outgoing-message-status
+    subscriptions:
+      - elec-dlw-outgoing-message-status-dlw-message-processor-sub
+  - name: elec-dlw-outgoing-message-retry
+    subscriptions:
+      - elec-dlw-outgoing-message-retry-dlw-message-processor-sub
+  - name: elec-corpay-outgoing-message
+    subscriptions:
+      - elec-corpay-outgoing-message-corpay-abstraction-service-sub
+  - name: elec-corpay-scheduled-payment-status-update
+    subscriptions:
+      - elec-corpay-scheduled-payment-status-update-corpay-abstraction-service-sub
+  - name: elec-data-hub-sync-event
+    subscriptions:
+      - elec-data-sync-event_elec-data-sync
+  - name: wires-createjournalentryevent
+    subscriptions:
+      - elec-wires-createjournalentryevent-sub
+  - name: wires-moneymovement-status
+    subscriptions:
+      - elec-wires-moneymovement-status-sub
+  - name: elec-wire-scheduler-execution-topic
+    subscriptions:
+      - elec-wire-scheduler-execution-topic-execution-processor-sub
+  - name: elec-wire-scheduler-creation-topic
+    subscriptions:
+      - elec-wire-scheduler-creation-topic-creation-processor-sub
+  - name: elec-wire-scheduler-instance-due-event
+    subscriptions:
+      - elec-wire-scheduler-instance-due-event-due-processor-sub
+  - name: elec-wire-scheduler-schedule-update-topic
+    subscriptions:
+      - elec-wire-scheduler-schedule-update-topic-completion-processor-sub
+  - name: development-platform-logrecordcreatecommand
+    subscriptions: []
