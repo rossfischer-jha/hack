@@ -117,3 +117,7 @@ topics:
       - elec-wire-scheduler-schedule-update-topic-completion-processor-sub
   - name: development-platform-logrecordcreatecommand
     subscriptions: []
+  - name: dev-shared-services-sanctionsenterpriseevent
+    subscriptions:
+      - shared-services-sanctionsenterpriseevent-elec-sub
+      - shared-services-sanctionsenterpriseevent-elec-entity-sub

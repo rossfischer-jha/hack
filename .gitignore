@@ -1,7 +1,6 @@
 .env
 .vscode/
 .idea/
-bin/
 
 # Vim swap files
 *.swp

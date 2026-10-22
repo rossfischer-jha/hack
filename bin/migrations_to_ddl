@@ -1,0 +1,501 @@
+#!/usr/bin/env python3
+"""Replay a directory of SQL migrations and emit the resulting (current) DDL.
+
+Point it at any app's migrations folder:
+
+    ./migrations_to_ddl.py ../../JHADigitalCore/elec-wire-approval-service/db/migrations
+
+Only DDL is interpreted (CREATE/ALTER/DROP for tables, indexes, views, sequences).
+DML (INSERT/UPDATE/DELETE/MERGE) is ignored, since it does not affect schema shape.
+Handles golang-migrate style naming (`0007_thing.up.sql` / `.down.sql`) and plain
+numbered files. Dialect-agnostic-ish: works with Cloud Spanner, Postgres and MySQL
+DDL because column definitions are carried through verbatim.
+"""
+
+from __future__ import annotations
+
+import argparse
+import re
+import sys
+from dataclasses import dataclass, field
+from pathlib import Path
+
+# --------------------------------------------------------------------------- #
+# lexing / statement splitting
+# --------------------------------------------------------------------------- #
+
+
+def strip_comments(sql: str) -> str:
+    out: list[str] = []
+    i, n = 0, len(sql)
+    quote = None
+    while i < n:
+        ch = sql[i]
+        if quote:
+            out.append(ch)
+            if ch == "\\" and quote in "'\"" and i + 1 < n:
+                out.append(sql[i + 1])
+                i += 2
+                continue
+            if ch == quote:
+                quote = None
+            i += 1
+            continue
+        if ch in "'\"`":
+            quote = ch
+            out.append(ch)
+            i += 1
+            continue
+        if sql.startswith("--", i) or sql.startswith("#", i):
+            while i < n and sql[i] != "\n":
+                i += 1
+            continue
+        if sql.startswith("/*", i):
+            end = sql.find("*/", i + 2)
+            i = n if end == -1 else end + 2
+            out.append(" ")
+            continue
+        out.append(ch)
+        i += 1
+    return "".join(out)
+
+
+def split_statements(sql: str) -> list[str]:
+    """Split on semicolons that are not inside quotes or parentheses."""
+    stmts: list[str] = []
+    buf: list[str] = []
+    depth = 0
+    quote = None
+    for ch in sql:
+        if quote:
+            buf.append(ch)
+            if ch == quote:
+                quote = None
+            continue
+        if ch in "'\"`":
+            quote = ch
+            buf.append(ch)
+            continue
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth = max(0, depth - 1)
+        elif ch == ";" and depth == 0:
+            stmts.append("".join(buf).strip())
+            buf = []
+            continue
+        buf.append(ch)
+    tail = "".join(buf).strip()
+    if tail:
+        stmts.append(tail)
+    return [s for s in stmts if s]
+
+
+def split_top_level(text: str) -> list[str]:
+    """Split a parenthesised body on top-level commas."""
+    parts: list[str] = []
+    buf: list[str] = []
+    depth = 0
+    quote = None
+    for ch in text:
+        if quote:
+            buf.append(ch)
+            if ch == quote:
+                quote = None
+            continue
+        if ch in "'\"`":
+            quote = ch
+        elif ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+        elif ch == "," and depth == 0:
+            parts.append("".join(buf).strip())
+            buf = []
+            continue
+        buf.append(ch)
+    tail = "".join(buf).strip()
+    if tail:
+        parts.append(tail)
+    return [p for p in parts if p]
+
+
+def matching_paren(text: str, start: int) -> int:
+    """Index of the ')' matching the '(' at `start`; -1 if unbalanced."""
+    depth = 0
+    quote = None
+    for i in range(start, len(text)):
+        ch = text[i]
+        if quote:
+            if ch == quote:
+                quote = None
+            continue
+        if ch in "'\"`":
+            quote = ch
+        elif ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+            if depth == 0:
+                return i
+    return -1
+
+
+def norm(name: str) -> str:
+    return name.strip().strip('`"[]').strip()
+
+
+def key(name: str) -> str:
+    return norm(name).lower()
+
+
+def collapse(text: str) -> str:
+    return re.sub(r"\s+", " ", text).strip()
+
+
+CONSTRAINT_START = re.compile(
+    r"^(constraint|primary\s+key|foreign\s+key|unique|check|key|index|exclude)\b",
+    re.IGNORECASE,
+)
+
+# --------------------------------------------------------------------------- #
+# schema model
+# --------------------------------------------------------------------------- #
+
+
+@dataclass
+class Table:
+    name: str
+    columns: dict[str, str] = field(default_factory=dict)  # key -> full definition
+    constraints: list[str] = field(default_factory=list)
+    suffix: str = ""  # e.g. Spanner "PRIMARY KEY (Id), INTERLEAVE IN PARENT ..."
+    extras: list[str] = field(default_factory=list)  # row deletion policies, etc.
+    origin: str = ""
+
+
+@dataclass
+class Schema:
+    tables: dict[str, Table] = field(default_factory=dict)
+    indexes: dict[str, tuple[str, str]] = field(default_factory=dict)  # key -> (table, ddl)
+    views: dict[str, str] = field(default_factory=dict)
+    other: dict[str, str] = field(default_factory=dict)  # sequences, types, etc.
+    warnings: list[str] = field(default_factory=list)
+
+
+# --------------------------------------------------------------------------- #
+# statement handlers
+# --------------------------------------------------------------------------- #
+
+RE_CREATE_TABLE = re.compile(
+    r"^create\s+table\s+(?:if\s+not\s+exists\s+)?([\w.`\"\[\]]+)\s*\(", re.IGNORECASE
+)
+RE_DROP_TABLE = re.compile(
+    r"^drop\s+table\s+(?:if\s+exists\s+)?([\w.`\"\[\]]+)", re.IGNORECASE
+)
+RE_ALTER_TABLE = re.compile(r"^alter\s+table\s+([\w.`\"\[\]]+)\s+(.*)$", re.IGNORECASE | re.DOTALL)
+RE_CREATE_INDEX = re.compile(
+    r"^create\s+(?:(?:unique|null_filtered|fulltext|spatial|clustered|nonclustered)\s+)*"
+    r"index\s+(?:if\s+not\s+exists\s+)?([\w.`\"\[\]]+)\s+on\s+([\w.`\"\[\]]+)",
+    re.IGNORECASE,
+)
+RE_DROP_INDEX = re.compile(
+    r"^drop\s+index\s+(?:if\s+exists\s+)?([\w.`\"\[\]]+)", re.IGNORECASE
+)
+RE_CREATE_VIEW = re.compile(
+    r"^create\s+(?:or\s+replace\s+)?(?:materialized\s+)?view\s+(?:if\s+not\s+exists\s+)?([\w.`\"\[\]]+)",
+    re.IGNORECASE,
+)
+RE_DROP_VIEW = re.compile(r"^drop\s+(?:materialized\s+)?view\s+(?:if\s+exists\s+)?([\w.`\"\[\]]+)", re.IGNORECASE)
+RE_CREATE_OTHER = re.compile(
+    r"^create\s+(?:or\s+replace\s+)?(sequence|type|schema|extension|change\s+stream)\s+"
+    r"(?:if\s+not\s+exists\s+)?([\w.`\"\[\]]+)",
+    re.IGNORECASE,
+)
+RE_DROP_OTHER = re.compile(
+    r"^drop\s+(sequence|type|schema|extension|change\s+stream)\s+(?:if\s+exists\s+)?([\w.`\"\[\]]+)",
+    re.IGNORECASE,
+)
+RE_DML = re.compile(r"^(insert|update|delete|merge|select|with|call|grant|revoke|set|use)\b", re.IGNORECASE)
+
+
+def apply_create_table(schema: Schema, stmt: str, origin: str) -> None:
+    m = RE_CREATE_TABLE.search(stmt)
+    if not m:
+        return
+    name = norm(m.group(1))
+    open_paren = stmt.index("(", m.end() - 1)
+    close = matching_paren(stmt, open_paren)
+    if close == -1:
+        schema.warnings.append(f"{origin}: unbalanced CREATE TABLE {name}")
+        return
+    body = stmt[open_paren + 1 : close]
+    suffix = collapse(stmt[close + 1 :].rstrip(";"))
+
+    table = Table(name=name, suffix=suffix, origin=origin)
+    for part in split_top_level(body):
+        if CONSTRAINT_START.match(part):
+            table.constraints.append(collapse(part))
+        else:
+            col = key(part.split()[0])
+            table.columns[col] = collapse(part)
+    schema.tables[key(name)] = table
+
+
+ALTER_ACTIONS = [
+    ("add_col", re.compile(r"^add\s+(?:column\s+)?(?:if\s+not\s+exists\s+)?(.+)$", re.IGNORECASE | re.DOTALL)),
+]
+
+
+def apply_alter_table(schema: Schema, stmt: str, origin: str) -> None:
+    m = RE_ALTER_TABLE.match(stmt.strip())
+    if not m:
+        return
+    tname = norm(m.group(1))
+    table = schema.tables.get(key(tname))
+    if table is None:
+        schema.warnings.append(f"{origin}: ALTER on unknown table {tname}; ignored")
+        return
+
+    for action in split_top_level(m.group(2)):
+        act = collapse(action)
+        low = act.lower()
+
+        if re.match(r"^rename\s+(?:column\s+)?[\w`\"\[\]]+\s+to\s+", low):
+            old, new = re.match(
+                r"^rename\s+(?:column\s+)?([\w`\"\[\]]+)\s+to\s+([\w`\"\[\]]+)", act, re.IGNORECASE
+            ).groups()
+            defn = table.columns.pop(key(old), None)
+            if defn:
+                rest = defn.split(None, 1)[1] if len(defn.split(None, 1)) > 1 else ""
+                table.columns[key(new)] = f"{norm(new)} {rest}".strip()
+            continue
+
+        if re.match(r"^rename\s+to\s+", low):
+            new = norm(re.match(r"^rename\s+to\s+([\w.`\"\[\]]+)", act, re.IGNORECASE).group(1))
+            schema.tables.pop(key(table.name))
+            table.name = new
+            schema.tables[key(new)] = table
+            continue
+
+        if low.startswith("drop constraint"):
+            cname = key(re.sub(r"^drop\s+constraint\s+(?:if\s+exists\s+)?", "", act, flags=re.IGNORECASE).split()[0])
+            table.constraints = [
+                c for c in table.constraints if not re.match(rf"^constraint\s+[`\"\[]?{re.escape(cname)}\b", c, re.IGNORECASE)
+            ]
+            continue
+
+        if re.match(r"^drop\s+(?:column\s+)?", low) and not low.startswith("drop row deletion"):
+            cname = key(re.sub(r"^drop\s+(?:column\s+)?(?:if\s+exists\s+)?", "", act, flags=re.IGNORECASE).split()[0])
+            table.columns.pop(cname, None)
+            continue
+
+        if low.startswith("drop row deletion policy"):
+            table.extras = [e for e in table.extras if "row deletion policy" not in e.lower()]
+            continue
+
+        if re.match(r"^(add|replace)\s+row\s+deletion\s+policy", low):
+            table.extras = [e for e in table.extras if "row deletion policy" not in e.lower()]
+            table.extras.append(re.sub(r"^(add|replace)\s+", "", act, flags=re.IGNORECASE))
+            continue
+
+        if CONSTRAINT_START.match(re.sub(r"^add\s+", "", act, flags=re.IGNORECASE)) and low.startswith("add"):
+            table.constraints.append(re.sub(r"^add\s+", "", act, flags=re.IGNORECASE))
+            continue
+
+        if low.startswith("add"):
+            body = ALTER_ACTIONS[0][1].match(act).group(1)
+            table.columns[key(body.split()[0])] = collapse(body)
+            continue
+
+        mm = re.match(r"^(?:alter|modify)\s+(?:column\s+)?([\w`\"\[\]]+)\s+(.*)$", act, re.IGNORECASE)
+        if mm:
+            cname, rest = key(mm.group(1)), mm.group(2)
+            existing = table.columns.get(cname, f"{norm(mm.group(1))}")
+            rest_low = rest.lower()
+            if rest_low.startswith(("set ", "drop ", "type ")):
+                # Postgres-style incremental change: record it rather than guess.
+                table.columns[cname] = f"{existing}  /* altered: {rest} */"
+            else:
+                table.columns[cname] = collapse(f"{norm(mm.group(1))} {rest}")
+            continue
+
+        schema.warnings.append(f"{origin}: unhandled ALTER action on {tname}: {act}")
+
+
+def apply_statement(schema: Schema, stmt: str, origin: str) -> None:
+    s = stmt.strip()
+    if not s or RE_DML.match(s):
+        return
+
+    if RE_CREATE_TABLE.search(s):
+        apply_create_table(schema, s, origin)
+        return
+
+    m = RE_DROP_TABLE.match(s)
+    if m:
+        k = key(m.group(1))
+        schema.tables.pop(k, None)
+        for ik in [i for i, (t, _) in schema.indexes.items() if key(t) == k]:
+            schema.indexes.pop(ik)
+        return
+
+    if RE_ALTER_TABLE.match(s):
+        apply_alter_table(schema, s, origin)
+        return
+
+    m = RE_CREATE_INDEX.match(s)
+    if m:
+        schema.indexes[key(m.group(1))] = (norm(m.group(2)), collapse(s) + ";")
+        return
+
+    m = RE_DROP_INDEX.match(s)
+    if m:
+        schema.indexes.pop(key(m.group(1)), None)
+        return
+
+    m = RE_CREATE_VIEW.match(s)
+    if m:
+        schema.views[key(m.group(1))] = collapse(s) + ";"
+        return
+
+    m = RE_DROP_VIEW.match(s)
+    if m:
+        schema.views.pop(key(m.group(1)), None)
+        return
+
+    m = RE_CREATE_OTHER.match(s)
+    if m:
+        schema.other[f"{m.group(1).lower()}:{key(m.group(2))}"] = collapse(s) + ";"
+        return
+
+    m = RE_DROP_OTHER.match(s)
+    if m:
+        schema.other.pop(f"{m.group(1).lower()}:{key(m.group(2))}", None)
+        return
+
+    schema.warnings.append(f"{origin}: unhandled statement: {collapse(s)[:120]}")
+
+
+# --------------------------------------------------------------------------- #
+# file discovery
+# --------------------------------------------------------------------------- #
+
+RE_LEADING_NUM = re.compile(r"^(\d+)")
+
+
+def sort_key(path: Path) -> tuple[int, str]:
+    m = RE_LEADING_NUM.match(path.name)
+    return (int(m.group(1)) if m else 1 << 30, path.name.lower())
+
+
+def discover(root: Path, direction: str, recursive: bool) -> list[Path]:
+    if root.is_file():
+        return [root]
+    files = sorted(
+        (root.rglob("*.sql") if recursive else root.glob("*.sql")),
+        key=sort_key,
+    )
+    if direction == "up":
+        files = [f for f in files if not f.name.lower().endswith(".down.sql")]
+    elif direction == "down":
+        # a rollback applies the newest migration first
+        files = [f for f in files if f.name.lower().endswith(".down.sql")][::-1]
+    return files
+
+
+# --------------------------------------------------------------------------- #
+# rendering
+# --------------------------------------------------------------------------- #
+
+
+def render(schema: Schema, source: str) -> str:
+    out: list[str] = [f"-- Consolidated DDL generated from migrations in: {source}", ""]
+
+    for name, ddl in schema.other.items():
+        if name.startswith(("sequence:", "type:", "schema:", "extension:")):
+            out.append(ddl)
+    if schema.other:
+        out.append("")
+
+    for table in schema.tables.values():
+        lines = list(table.columns.values()) + table.constraints
+        out.append(f"CREATE TABLE {table.name} (")
+        out.append(",\n".join(f"    {line}" for line in lines))
+        out.append(f") {table.suffix};" if table.suffix else ");")
+        for extra in table.extras:
+            out.append(f"ALTER TABLE {table.name} ADD {extra};")
+        idx = [ddl for tbl, ddl in schema.indexes.values() if key(tbl) == key(table.name)]
+        if idx:
+            out.append("")
+            out.extend(idx)
+        out.append("")
+
+    orphan = [ddl for tbl, ddl in schema.indexes.values() if key(tbl) not in schema.tables]
+    if orphan:
+        out.append("-- indexes on unknown/dropped tables")
+        out.extend(orphan)
+        out.append("")
+
+    if schema.views:
+        out.extend(schema.views.values())
+        out.append("")
+
+    return "\n".join(out).rstrip() + "\n"
+
+
+# --------------------------------------------------------------------------- #
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("path", type=Path, help="migrations directory (or a single .sql file)")
+    ap.add_argument("-o", "--out", type=Path, help="write DDL to this file instead of stdout")
+    ap.add_argument(
+        "--direction",
+        choices=("up", "down", "all"),
+        default="up",
+        help="which migration files to replay (default: up)",
+    )
+    ap.add_argument("--no-recursive", action="store_true", help="do not descend into subdirectories")
+    ap.add_argument("--list", action="store_true", help="list the files in replay order and exit")
+    ap.add_argument("--strict", action="store_true", help="exit non-zero if any statement was not understood")
+    ap.add_argument("-q", "--quiet", action="store_true", help="suppress warnings on stderr")
+    args = ap.parse_args()
+
+    if not args.path.exists():
+        print(f"error: {args.path} does not exist", file=sys.stderr)
+        return 2
+
+    files = discover(args.path, args.direction, not args.no_recursive)
+    if not files:
+        print(f"error: no .sql files found under {args.path}", file=sys.stderr)
+        return 2
+
+    if args.list:
+        for f in files:
+            print(f)
+        return 0
+
+    schema = Schema()
+    for f in files:
+        text = strip_comments(f.read_text(encoding="utf-8", errors="replace"))
+        for stmt in split_statements(text):
+            apply_statement(schema, stmt, f.name)
+
+    ddl = render(schema, str(args.path))
+    if args.out:
+        args.out.write_text(ddl, encoding="utf-8")
+        print(f"wrote {args.out}", file=sys.stderr)
+    else:
+        sys.stdout.write(ddl)
+
+    if schema.warnings and not args.quiet:
+        print(f"\n{len(schema.warnings)} warning(s):", file=sys.stderr)
+        for w in schema.warnings:
+            print(f"  {w}", file=sys.stderr)
+
+    return 1 if args.strict and schema.warnings else 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
