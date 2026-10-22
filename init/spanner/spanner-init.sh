@@ -1,7 +1,7 @@
 #! /bin/bash
 set -eu
 
-DATABASES="elec-wire-service-db,elec-wire-entity-service-db,elec-wire-approval-db,elec-wire-draft-service-db,elec-wire-test-db,elec-money-transfer-service-db,elec-inc-wire-processor-db,elec-wire-fee-db"
+DATABASES="elec-wire-service-db,elec-wire-entity-service-db,elec-wire-approval-db,elec-wire-draft-service-db,elec-wire-test-db,elec-money-transfer-service-db,elec-inc-wire-processor-db,elec-wire-fee-db,elec-fed-send-service-db"
 
 gcloud config configurations create emulator
 gcloud config set auth/disable_credentials true

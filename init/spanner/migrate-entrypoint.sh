@@ -27,3 +27,5 @@ migrate -database "spanner://projects/${PROJECT}/instances/${INSTANCE}/databases
 echo "Migrating Wire Test Service"
 migrate -database "spanner://projects/${PROJECT}/instances/${INSTANCE}/databases/elec-wire-test-db?x-clean-statements=true&x-dml-comment-flag=DML" -verbose -path /elec-wire-test-migrations up
 
+echo "Migrating Fed Send Service"
+migrate -database "spanner://projects/${PROJECT}/instances/${INSTANCE}/databases/elec-fed-send-service-db?x-clean-statements=true&x-dml-comment-flag=DML" -verbose -path /elec-fed-send-service-migrations up

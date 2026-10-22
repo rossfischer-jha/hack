@@ -154,6 +154,7 @@ services:
       - "../../JHADigitalCore/elec-incoming-wire-processor/db/migrations/:/elec-incoming-wire-processor-migrations"
       - "../../JHADigitalCore/elec-wire-fee-service/db/migrations/:/elec-wire-fee-service-migrations"
       - "../../JHADigitalCore/elec-wire-test/db/migrations/:/elec-wire-test-migrations"
+      - "../../JHADigitalCore/elec-fed-send-service/db/migrations/:/elec-fed-send-service-migrations"
     depends_on:
       spanner:
         condition: service_started
